@@ -1,0 +1,139 @@
+﻿name: Universal Encrypted CI Runner
+
+on:
+  push:
+    paths:
+      - 'payload.enc'
+      - 'trigger.txt'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-runner-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Encrypted Project
+    runs-on: macos-14
+    steps:
+      - name: Checkout Runner Repo
+        uses: actions/checkout@v4
+
+      - name: Verify Payload Exists
+        run: |
+          if [ ! -f "payload.enc" ]; then
+            echo "::error::payload.enc not found. Nothing to build."
+            exit 1
+          fi
+
+      - name: Decrypt Source Payload (AES-256-CBC)
+        env:
+          CI_SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
+        run: |
+          if [ -z "$CI_SECRET_KEY" ]; then
+            echo "::error::CI_SECRET_KEY secret is not set in repository settings."
+            exit 1
+          fi
+          
+          python3 - << 'EOF'
+          import os, base64, hashlib
+          from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+          from cryptography.hazmat.backends import default_backend
+
+          password = os.environ['CI_SECRET_KEY'].encode('utf-8')
+          with open('payload.enc', 'rb') as f:
+              raw = f.read()
+
+          salt = raw[:16]
+          iv = raw[16:32]
+          ciphertext = raw[32:]
+
+          # PBKDF2 HMAC-SHA256, 100000 rounds
+          key = hashlib.pbkdf2_hmac('sha256', password, salt, 100000, dklen=32)
+
+          cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+          decryptor = cipher.decryptor()
+          padded_data = decryptor.update(ciphertext) + decryptor.finalize()
+
+          pad_len = padded_data[-1]
+          data = padded_data[:-pad_len]
+
+          with open('source.zip', 'wb') as f:
+              f.write(data)
+          print("Payload decrypted successfully.")
+          EOF
+
+      - name: Unpack Source & Read Manifest
+        run: |
+          mkdir -p workspace
+          unzip -q source.zip -d workspace
+          rm -f source.zip payload.enc
+          
+          if [ ! -f "workspace/manifest.json" ]; then
+            echo "::error::manifest.json not found inside decrypted package."
+            exit 1
+          fi
+          
+          PROJECT_NAME=$(python3 -c "import json; print(json.load(open('workspace/manifest.json')).get('projectName', 'App'))")
+          PLATFORM=$(python3 -c "import json; print(json.load(open('workspace/manifest.json')).get('platform', 'ios'))")
+          echo "PROJECT_NAME=$PROJECT_NAME" >> $GITHUB_ENV
+          echo "PLATFORM=$PLATFORM" >> $GITHUB_ENV
+          echo "Target Project: $PROJECT_NAME (Platform: $PLATFORM)"
+
+      # ==========================================
+      # iOS Platform Pipeline
+      # ==========================================
+      - name: Install XcodeGen (iOS only)
+        if: env.PLATFORM == 'ios'
+        run: |
+          brew install xcodegen
+
+      - name: Generate Xcode Project (iOS only)
+        if: env.PLATFORM == 'ios'
+        working-directory: workspace
+        run: |
+          xcodegen generate
+
+      - name: Build Unsigned IPA (iOS only)
+        if: env.PLATFORM == 'ios'
+        working-directory: workspace
+        run: |
+          xcodebuild -project "${PROJECT_NAME}.xcodeproj" \
+                     -scheme "${PROJECT_NAME}" \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     -destination "generic/platform=iOS" \
+                     CODE_SIGN_IDENTITY="" \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGN_ENTITLEMENTS="" \
+                     CODE_SIGNING_ALLOWED=NO \
+                     build \
+                     SYMROOT=build
+
+          APP_PATH=$(find build/Release-iphoneos -name "${PROJECT_NAME}.app" -maxdepth 1 -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Built .app not found in build/Release-iphoneos"
+            exit 1
+          fi
+
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry "../${PROJECT_NAME}.ipa" Payload
+          echo "Successfully created ${PROJECT_NAME}.ipa"
+
+      - name: Upload IPA Artifact (iOS only)
+        if: env.PLATFORM == 'ios'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-ipa
+          path: ${{ env.PROJECT_NAME }}.ipa
+          retention-days: 7
+          if-no-files-found: error
+
+      # ==========================================
+      # Self-Cleaning to preserve zero residue
+      # ==========================================
+      - name: Clean Workspace
+        if: always()
+        run: |
+          rm -rf workspace Payload *.ipa *.zip payload.enc
