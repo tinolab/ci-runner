@@ -11,6 +11,9 @@ concurrency:
   group: ci-runner-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Encrypted Project
@@ -48,7 +51,6 @@ jobs:
           iv = raw[16:32]
           ciphertext = raw[32:]
 
-          # PBKDF2 HMAC-SHA256, 100000 rounds
           key = hashlib.pbkdf2_hmac('sha256', password, salt, 100000, dklen=32)
 
           cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
@@ -142,6 +144,16 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      - name: Publish Public Release Asset (iOS only)
+        if: env.PLATFORM == 'ios'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-build
+          name: "Latest Build (${{ env.PROJECT_NAME }})"
+          files: ${{ env.PROJECT_NAME }}.ipa
+          prerelease: false
+          make_latest: true
+
       # ==========================================
       # Self-Cleaning to preserve zero residue
       # ==========================================
@@ -149,4 +161,3 @@ jobs:
         if: always()
         run: |
           rm -rf workspace Payload *.ipa *.zip payload.enc
-
