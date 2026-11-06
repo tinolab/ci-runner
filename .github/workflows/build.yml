@@ -86,8 +86,8 @@ jobs:
             exit 1
           fi
           
-          PROJECT_NAME=$(python3 -c "import json; print(json.load(open('workspace/manifest.json')).get('projectName', 'App'))")
-          PLATFORM=$(python3 -c "import json; print(json.load(open('workspace/manifest.json')).get('platform', 'ios'))")
+          PROJECT_NAME=$(python3 -c "import json; print(json.load(open('workspace/manifest.json', encoding='utf-8-sig')).get('projectName', 'App'))")
+          PLATFORM=$(python3 -c "import json; print(json.load(open('workspace/manifest.json', encoding='utf-8-sig')).get('platform', 'ios'))")
           echo "PROJECT_NAME=$PROJECT_NAME" >> $GITHUB_ENV
           echo "PLATFORM=$PLATFORM" >> $GITHUB_ENV
           echo "Target Project: $PROJECT_NAME (Platform: $PLATFORM)"
@@ -149,3 +149,4 @@ jobs:
         if: always()
         run: |
           rm -rf workspace Payload *.ipa *.zip payload.enc
+
