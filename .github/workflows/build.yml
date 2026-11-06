@@ -66,7 +66,17 @@ jobs:
       - name: Unpack Source & Read Manifest
         run: |
           mkdir -p workspace
-          unzip -q source.zip -d workspace
+          python3 -c "import zipfile, os
+with zipfile.ZipFile('source.zip', 'r') as z:
+    for member in z.infolist():
+        target_path = os.path.join('workspace', member.filename.replace('\\', '/'))
+        if member.is_dir() or target_path.endswith('/'):
+            os.makedirs(target_path, exist_ok=True)
+        else:
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with open(target_path, 'wb') as f:
+                f.write(z.read(member.filename))
+"
           rm -f source.zip payload.enc
           
           if [ ! -f "workspace/manifest.json" ]; then
@@ -137,4 +147,5 @@ jobs:
         if: always()
         run: |
           rm -rf workspace Payload *.ipa *.zip payload.enc
+
 
