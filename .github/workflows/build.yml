@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build:
     name: Build Encrypted Project
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout Runner Repo
         uses: actions/checkout@v4
@@ -137,3 +137,4 @@ jobs:
         if: always()
         run: |
           rm -rf workspace Payload *.ipa *.zip payload.enc
+
