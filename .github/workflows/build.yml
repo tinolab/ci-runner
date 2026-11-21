@@ -97,10 +97,24 @@ jobs:
       # ==========================================
       # iOS Platform Pipeline
       # ==========================================
+      - name: Cache XcodeGen (iOS only)
+        if: env.PLATFORM == 'ios'
+        uses: actions/cache@v4
+        with:
+          path: |
+            /opt/homebrew/Cellar/xcodegen
+            /opt/homebrew/bin/xcodegen
+          key: ${{ runner.os }}-xcodegen-v1
+
       - name: Install XcodeGen (iOS only)
         if: env.PLATFORM == 'ios'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
-          brew install xcodegen
+          if ! command -v xcodegen >/dev/null 2>&1 || ! xcodegen --version >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
 
       - name: Generate Xcode Project (iOS only)
         if: env.PLATFORM == 'ios'
@@ -117,6 +131,8 @@ jobs:
                      -configuration Release \
                      -sdk iphoneos \
                      -destination "generic/platform=iOS" \
+                     ARCHS=arm64 \
+                     COMPILER_INDEX_STORE_ENABLE=NO \
                      CODE_SIGN_IDENTITY="" \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_ENTITLEMENTS="" \
@@ -132,7 +148,7 @@ jobs:
 
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          zip -qry "../${PROJECT_NAME}.ipa" Payload
+          zip -1qry "../${PROJECT_NAME}.ipa" Payload
           echo "Successfully created ${PROJECT_NAME}.ipa"
 
       - name: Upload IPA Artifact (iOS only)
